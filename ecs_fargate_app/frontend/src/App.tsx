@@ -82,7 +82,7 @@ function AppContent() {
           href: '#',
           title: "Infrastructure as Code (IaC) Analyzer",
           logo: {
-            src: "/cloudzap-logo.png",
+            src: "/cloudza-logo.png",
             alt: "Well-Architected"
           }
         }}
