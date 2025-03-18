@@ -266,12 +266,12 @@ Rules:
         AssertDescription: "When Authentication is enabled, Auth Type must be one of: new-cognito, existing-cognito, oidc"
   
 Resources:
-  GitHubTokenParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: "/github/token"
-      Type: "String"
-      Value: !Ref GitHubToken
+  # GitHubTokenParameter:
+  #   Type: AWS::SSM::Parameter
+  #   Properties:
+  #     Name: "/github/token"
+  #     Type: "String"
+  #     Value: !Ref GitHubToken
 
   # CloudWatch Log Group with retention
   DeploymentLogGroup:
