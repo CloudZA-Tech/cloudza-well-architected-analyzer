@@ -34,6 +34,11 @@ Parameters:
     Description: 'ARN of the SSL certificate in ACM. Required when Authentication is True. Example: arn:aws:acm:region:account:certificate/certificate-id'
     AllowedPattern: '^(arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[a-zA-Z0-9-]+|)$'
     ConstraintDescription: 'Certificate ARN must be in the format: arn:aws:acm:region:account:certificate/certificate-id or empty'
+
+    GitHubToken:
+      Type: String
+      Description: "GitHub token for repository access"
+      NoEcho: true
   
   # New Cognito Settings
   CognitoDomainPrefix:
@@ -624,7 +629,8 @@ Resources:
               content: !Sub |
                 #!/bin/bash -xe
                 cd /home/ec2-user
-                git clone https://github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
+                TOKEN=${GitHubToken}
+                git clone https://${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
                 cd cloudza-well-architected-iac-analyzer
                 
                 # Update the configuration
