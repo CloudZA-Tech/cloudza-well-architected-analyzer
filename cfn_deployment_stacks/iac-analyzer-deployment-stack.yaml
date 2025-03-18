@@ -590,17 +590,26 @@ Resources:
               group: "ec2-user"
               
             /home/ec2-user/run-deployment.sh:
-              content: !Sub |
-                #!/bin/bash -xe
-                cd /home/ec2-user
-                TOKEN=${GitHubToken}
-                git clone https://$${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
-                cd cloudza-well-architected-analyzer
-                /home/ec2-user/update-config.sh
-                chmod +x deploy-wa-analyzer.sh
-                export AWS_REGION=${AWS::Region}
-                ./deploy-wa-analyzer.sh -r ${AWS::Region} -c docker -a ${AWS::StackName}
-                exit $?
+              content: !Join 
+                - ""
+                - - "#!/bin/bash -xe\n"
+                  - "cd /home/ec2-user\n"
+                  - "TOKEN=${GitHubToken}\n"
+                  - "git clone https://$"
+                  - "{TOKEN}"
+                  - "@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git\n"
+                  - "cd cloudza-well-architected-analyzer\n"
+                  - "/home/ec2-user/update-config.sh\n"
+                  - "chmod +x deploy-wa-analyzer.sh\n"
+                  - "export AWS_REGION="
+                  - !Ref "AWS::Region"
+                  - "\n"
+                  - "./deploy-wa-analyzer.sh -r "
+                  - !Ref "AWS::Region"
+                  - " -c docker -a "
+                  - !Ref "AWS::StackName"
+                  - "\n"
+                  - "exit $?\n"
               mode: "000755"
               owner: "ec2-user"
               group: "ec2-user"
