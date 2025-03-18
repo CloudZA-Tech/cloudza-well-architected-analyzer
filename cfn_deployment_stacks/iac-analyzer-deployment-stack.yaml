@@ -35,11 +35,11 @@ Parameters:
     AllowedPattern: '^(arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[a-zA-Z0-9-]+|)$'
     ConstraintDescription: 'Certificate ARN must be in the format: arn:aws:acm:region:account:certificate/certificate-id or empty'
 
-    GitHubToken:
-      Type: String
-      Description: "GitHub token for repository access"
-      NoEcho: true
-  
+  GitHubToken:
+    Type: String
+    Description: "GitHub token for repository access"
+    NoEcho: true
+
   # New Cognito Settings
   CognitoDomainPrefix:
     Type: String
@@ -107,7 +107,7 @@ Parameters:
     Type: String
     Default: ''
     Description: 'OIDC logout URL. Required when "Authentication Method = oidc". Example for Okta: https://<okta-tenant-id>.us.auth0.com/v2/logout?client_id=<oidc-client-id>&returnTo=https://wa-analyzer.example.com (# Refer to https://auth0.com/docs/authenticate/login/logout)'
-  
+
 Metadata: 
   AWS::CloudFormation::Interface: 
     ParameterGroups: 
@@ -124,6 +124,7 @@ Metadata:
           - Authentication
           - AuthType
           - CertificateArn
+          - GitHubToken
       - 
         Label: 
           default: 'New-Cognito Settings (Optional, only if Authentication Method is "new-cognito")'
@@ -163,6 +164,8 @@ Metadata:
         default: "Authentication Method"
       CertificateArn:
         default: "SSL Certificate ARN"
+      GitHubToken:
+        default: "GitHub Token"
         
       # New Cognito Settings
       CognitoDomainPrefix:
@@ -263,13 +266,19 @@ Rules:
         AssertDescription: "When Authentication is enabled, Auth Type must be one of: new-cognito, existing-cognito, oidc"
   
 Resources:
+  GitHubTokenParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/github/token"
+      Type: SecureString
+      Value: !Ref GitHubToken
+
   # CloudWatch Log Group with retention
   DeploymentLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      # Use a combination of region, account and stack name for uniqueness
       LogGroupName: !Join 
         - '-'
         - - 'iac-deployment-logs'
@@ -405,7 +414,6 @@ Resources:
             - 06_deploy_analyzer
             - 07_cleanup
 
-        # Setup basic logging first (file-based only)
         01_setup_basic_logs:
           files:
             /var/log/user-data.log:
@@ -415,7 +423,6 @@ Resources:
               content: "Well-Architected IaC Analyzer deployment log\n"
               mode: "000666"
               
-        # Ensure network connectivity is established
         02_ensure_connectivity:
           files:
             /usr/local/bin/wait-for-network.sh:
@@ -423,7 +430,6 @@ Resources:
                 #!/bin/bash
                 echo "Checking network connectivity..." >> /var/log/user-data.log
                 
-                # Wait for network to be available
                 for i in {1..30}; do
                   echo "Network check attempt $i..." >> /var/log/user-data.log
                   if ping -c 1 amazon.com > /dev/null 2>&1; then
@@ -442,41 +448,29 @@ Resources:
             02_fix_dns:
               command: |
                 echo "Ensuring DNS configuration is correct..." >> /var/log/user-data.log
-                # Add public DNS servers as fallback
                 echo "nameserver 8.8.8.8" >> /etc/resolv.conf
                 echo "nameserver 1.1.1.1" >> /etc/resolv.conf
                 cat /etc/resolv.conf >> /var/log/user-data.log
             03_test_repo_access:
               command: |
                 echo "Testing repository access..." >> /var/log/user-data.log
-                # Clear dnf cache
                 dnf clean all >> /var/log/user-data.log 2>&1
-                # Force refresh the repo metadata with increased timeout
                 dnf makecache --refresh --assumeyes --setopt=timeout=300 >> /var/log/user-data.log 2>&1
                 RESULT=$?
                 echo "Repository refresh completed with status $RESULT" >> /var/log/user-data.log
-                exit 0  # Continue even if this fails
+                exit 0
 
-        # Install required packages
         03_install_packages:
           files:
             /usr/local/bin/install-packages.sh:
               content: |
                 #!/bin/bash
-                
                 echo "Starting package installation..." >> /var/log/user-data.log
-                
-                # Retry logic for package installation
                 MAX_RETRIES=5
                 RETRY_DELAY=30
-                
                 for i in $(seq 1 $MAX_RETRIES); do
                   echo "Installation attempt $i of $MAX_RETRIES" >> /var/log/user-data.log
-                  
-                  # Clean any cached data
                   dnf clean all >> /var/log/user-data.log 2>&1
-                  
-                  # Try to install packages
                   if dnf install -y git docker python3.11 python3.11-pip pip nodejs20 npm aws-cli aws-cfn-bootstrap amazon-cloudwatch-agent >> /var/log/user-data.log 2>&1; then
                     echo "Package installation successful!" >> /var/log/user-data.log
                     exit 0
@@ -485,7 +479,6 @@ Resources:
                     sleep $RETRY_DELAY
                   fi
                 done
-                
                 echo "Failed to install packages after $MAX_RETRIES attempts" >> /var/log/user-data.log
                 exit 1
               mode: "000755"
@@ -493,7 +486,6 @@ Resources:
             01_install_dependencies:
               command: "/usr/local/bin/install-packages.sh"
 
-        # Setup CloudWatch after packages are installed
         04_setup_cloudwatch:
           commands:
             01_configure_cloudwatch:
@@ -526,7 +518,6 @@ Resources:
                 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
                 echo "CloudWatch Agent configured and started" >> /var/log/user-data.log
 
-        # Configure services
         05_configure_services:
           commands:
             01_enable_docker:
@@ -536,89 +527,64 @@ Resources:
             03_install_cdk:
               command: "npm install -g aws-cdk >> /var/log/user-data.log 2>&1"
 
-        # Deploy analyzer
         06_deploy_analyzer:
           files:
             /home/ec2-user/update-config.sh:
               content: !Sub |
                 #!/bin/bash -xe
                 CONFIG_FILE="/home/ec2-user/well-architected-iac-analyzer/config.ini"
-                
-                # Update basic settings
                 sed -i "s/^model_id = .*$/model_id = ${ModelId}/" $CONFIG_FILE
                 sed -i "s/^public_load_balancer = .*$/public_load_balancer = ${PublicLoadBalancer}/" $CONFIG_FILE
-                
-                # Update authentication settings
                 sed -i "s/^authentication = .*$/authentication = ${Authentication}/" $CONFIG_FILE
                 sed -i "s/^auth_type = .*$/auth_type = ${AuthType}/" $CONFIG_FILE
-                
-                # Update certificate ARN if specified
                 if [ "${CertificateArn}" != "" ]; then
                   sed -i "s|^certificate_arn = .*$|certificate_arn = ${CertificateArn}|" $CONFIG_FILE
                 fi
-                
-                # Update New Cognito settings if applicable
                 if [ "${AuthType}" == "new-cognito" ]; then
                   if [ "${CognitoDomainPrefix}" != "" ]; then
                     sed -i "s/^cognito_domain_prefix = .*$/cognito_domain_prefix = ${CognitoDomainPrefix}/" $CONFIG_FILE
                   fi
-                  
                   if [ "${CallbackUrls}" != "" ]; then
                     sed -i "s|^callback_urls = .*$|callback_urls = ${CallbackUrls}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${LogoutUrl}" != "" ]; then
                     sed -i "s|^logout_url = .*$|logout_url = ${LogoutUrl}|" $CONFIG_FILE
                   fi
                 fi
-                
-                # Update Existing Cognito settings if applicable
                 if [ "${AuthType}" == "existing-cognito" ]; then
                   if [ "${ExistingUserPoolArn}" != "" ]; then
                     sed -i "s|^existing_user_pool_arn = .*$|existing_user_pool_arn = ${ExistingUserPoolArn}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${ExistingUserPoolClientId}" != "" ]; then
                     sed -i "s/^existing_user_pool_client_id = .*$/existing_user_pool_client_id = ${ExistingUserPoolClientId}/" $CONFIG_FILE
                   fi
-                  
                   if [ "${ExistingUserPoolDomain}" != "" ]; then
                     sed -i "s/^existing_user_pool_domain = .*$/existing_user_pool_domain = ${ExistingUserPoolDomain}/" $CONFIG_FILE
                   fi
-                  
                   if [ "${ExistingCognitoLogoutUrl}" != "" ]; then
                     sed -i "s|^existing_cognito_logout_url = .*$|existing_cognito_logout_url = ${ExistingCognitoLogoutUrl}|" $CONFIG_FILE
                   fi
                 fi
-                
-                # Update OIDC settings if applicable
                 if [ "${AuthType}" == "oidc" ]; then
                   if [ "${OidcIssuer}" != "" ]; then
                     sed -i "s|^oidc_issuer = .*$|oidc_issuer = ${OidcIssuer}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${OidcClientId}" != "" ]; then
                     sed -i "s/^oidc_client_id = .*$/oidc_client_id = ${OidcClientId}/" $CONFIG_FILE
                   fi
-                  
                   if [ "${OidcAuthorizationEndpoint}" != "" ]; then
                     sed -i "s|^oidc_authorization_endpoint = .*$|oidc_authorization_endpoint = ${OidcAuthorizationEndpoint}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${OidcTokenEndpoint}" != "" ]; then
                     sed -i "s|^oidc_token_endpoint = .*$|oidc_token_endpoint = ${OidcTokenEndpoint}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${OidcUserInfoEndpoint}" != "" ]; then
                     sed -i "s|^oidc_user_info_endpoint = .*$|oidc_user_info_endpoint = ${OidcUserInfoEndpoint}|" $CONFIG_FILE
                   fi
-                  
                   if [ "${OidcLogoutUrl}" != "" ]; then
                     sed -i "s|^oidc_logout_url = .*$|oidc_logout_url = ${OidcLogoutUrl}|" $CONFIG_FILE
                   fi
                 fi
-                
-                # Log the updated configuration
                 echo "Updated configuration:" >> /var/log/deploy-wa-analyzer.log
                 cat $CONFIG_FILE >> /var/log/deploy-wa-analyzer.log
               mode: "000755"
@@ -631,11 +597,8 @@ Resources:
                 cd /home/ec2-user
                 TOKEN=${GitHubToken}
                 git clone https://${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
-                cd cloudza-well-architected-iac-analyzer
-                
-                # Update the configuration
+                cd cloudza-well-architected-analyzer
                 /home/ec2-user/update-config.sh
-                
                 chmod +x deploy-wa-analyzer.sh
                 export AWS_REGION=${AWS::Region}
                 ./deploy-wa-analyzer.sh -r ${AWS::Region} -c docker -a ${AWS::StackName}
@@ -650,16 +613,13 @@ Resources:
                 sudo -u ec2-user /home/ec2-user/run-deployment.sh >> /var/log/deploy-wa-analyzer.log 2>&1
                 DEPLOYMENT_STATUS=$?
                 echo "Deployment completed with status $DEPLOYMENT_STATUS at $(date)" >> /var/log/deploy-wa-analyzer.log
-                # Create file marker to indicate deployment status for next steps
                 if [ $DEPLOYMENT_STATUS -eq 0 ]; then
                   touch /tmp/deployment-success
                 else
                   touch /tmp/deployment-failure
-                  # Send failure signal if deployment failed
                   /opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
                 fi
 
-        # Cleanup and self-terminate
         07_cleanup:
           files:
             /tmp/delete-stack-event.json:
@@ -677,17 +637,10 @@ Resources:
               content: !Sub |
                 #!/bin/bash
                 export AWS_DEFAULT_REGION=${AWS::Region}
-
                 cat /tmp/delete-stack-event.json
-                
-                # Send event to EventBridge for stack deletion
                 echo "Sending deletion event to EventBridge at $(date)"
                 aws events put-events --entries file:///tmp/delete-stack-event.json
-                
-                # Wait 2 minutes before trying again in case the first attempt fails
                 sleep 120
-                
-                # Send the event again as a backup
                 echo "Sending backup deletion event to EventBridge at $(date)"
                 aws events put-events --entries file:///tmp/delete-stack-event.json
               mode: "000755"
@@ -696,11 +649,8 @@ Resources:
               command: !Sub |
                 echo "Sending completion signal to CloudFormation at $(date)" >> /var/log/deploy-wa-analyzer.log
                 /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
-                
-                # Wait a moment to ensure signal is processed
                 sleep 30
                 echo "Signal sent successfully at $(date)" >> /var/log/deploy-wa-analyzer.log
-            
             02_schedule_deletion:
               command: |
                 if [ -f /tmp/deployment-failure ]; then
@@ -712,7 +662,6 @@ Resources:
 
     Properties:
       InstanceType: t3.xlarge
-      # Direct reference to the latest Amazon Linux 2023 AMI through SSM parameter
       ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
       IamInstanceProfile: !Ref EC2InstanceProfile
       SubnetId: !Ref PublicSubnet
@@ -730,21 +679,14 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
-          # Create log file with exec redirection
           touch /var/log/user-data.log
           chmod 666 /var/log/user-data.log
           exec > >(tee -a /var/log/user-data.log) 2>&1
-
           echo "Starting UserData execution at $(date)"
-
-          # Set environment variable for region
           export AWS_DEFAULT_REGION=${AWS::Region}
           echo "AWS_DEFAULT_REGION=${AWS::Region}" >> /home/ec2-user/.bashrc
-
-          # Basic installation of cfn-bootstrap
           echo "Initial installation of cfn-bootstrap..."
           dnf clean all
-          # Retry dnf update with better error handling
           for i in {1..5}; do
             echo "Update attempt $i..."
             if dnf update -y; then
@@ -755,8 +697,6 @@ Resources:
               sleep 10
             fi
           done
-          
-          # Retry installing cfn-bootstrap
           for i in {1..5}; do
             echo "cfn-bootstrap installation attempt $i..."
             if dnf install -y aws-cfn-bootstrap; then
@@ -767,8 +707,6 @@ Resources:
               sleep 10
             fi
           done
-
-          # Wait for network to be fully functional
           echo "Waiting for networking to stabilize..."
           for i in {1..6}; do
             echo "Network check attempt $i..."
@@ -778,14 +716,11 @@ Resources:
             fi
             sleep 10
           done
-          
-          # Initialize cfn-init with retries
           echo "Running cfn-init..."
           for i in {1..3}; do
             echo "cfn-init attempt $i..."
             /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} --configsets default
             CFN_INIT_RESULT=$?
-            
             if [ $CFN_INIT_RESULT -eq 0 ]; then
               echo "cfn-init completed successfully"
               break
