@@ -10,6 +10,7 @@
     "start:finch": "finch run --rm -p 8080:8080 frontend",
     "lint": "eslint .",
     "preview": "vite preview"
+    
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-agent-runtime": "^3.x.x",
