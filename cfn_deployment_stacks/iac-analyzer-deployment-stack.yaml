@@ -270,7 +270,7 @@ Resources:
     Type: AWS::SSM::Parameter
     Properties:
       Name: "/github/token"
-      Type: String
+      Type: "SecureString"
       Value: !Ref GitHubToken
 
   # CloudWatch Log Group with retention
