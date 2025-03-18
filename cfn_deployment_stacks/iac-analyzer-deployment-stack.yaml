@@ -429,7 +429,6 @@ Resources:
               content: |
                 #!/bin/bash
                 echo "Checking network connectivity..." >> /var/log/user-data.log
-                
                 for i in {1..30}; do
                   echo "Network check attempt $i..." >> /var/log/user-data.log
                   if ping -c 1 amazon.com > /dev/null 2>&1; then
@@ -438,7 +437,6 @@ Resources:
                   fi
                   sleep 10
                 done
-                
                 echo "Network check failed after 30 attempts" >> /var/log/user-data.log
                 exit 1
               mode: "000755"
@@ -596,7 +594,7 @@ Resources:
                 #!/bin/bash -xe
                 cd /home/ec2-user
                 TOKEN=${GitHubToken}
-                git clone https://${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
+                git clone https://$${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
                 cd cloudza-well-architected-analyzer
                 /home/ec2-user/update-config.sh
                 chmod +x deploy-wa-analyzer.sh
