@@ -266,12 +266,12 @@ Rules:
         AssertDescription: "When Authentication is enabled, Auth Type must be one of: new-cognito, existing-cognito, oidc"
   
 Resources:
-  # GitHubTokenParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties:
-  #     Name: "/github/token"
-  #     Type: "String"
-  #     Value: !Ref GitHubToken
+  GitHubTokenParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: "/github/token"
+      Type: "String"
+      Value: !Ref GitHubToken
 
   # CloudWatch Log Group with retention
   DeploymentLogGroup:
@@ -590,26 +590,17 @@ Resources:
               group: "ec2-user"
               
             /home/ec2-user/run-deployment.sh:
-              content: !Join 
-                - ""
-                - - "#!/bin/bash -xe\n"
-                  - "cd /home/ec2-user\n"
-                  - "TOKEN=${GitHubToken}\n"
-                  - "git clone https://$"
-                  - "{TOKEN}"
-                  - "@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git\n"
-                  - "cd cloudza-well-architected-analyzer\n"
-                  - "/home/ec2-user/update-config.sh\n"
-                  - "chmod +x deploy-wa-analyzer.sh\n"
-                  - "export AWS_REGION="
-                  - !Ref "AWS::Region"
-                  - "\n"
-                  - "./deploy-wa-analyzer.sh -r "
-                  - !Ref "AWS::Region"
-                  - " -c docker -a "
-                  - !Ref "AWS::StackName"
-                  - "\n"
-                  - "exit $?\n"
+              content: !Sub |
+                #!/bin/bash -xe
+                cd /home/ec2-user
+                TOKEN=${GitHubToken}
+                git clone https://${TOKEN}@github.com/CloudZA-Tech/cloudza-well-architected-analyzer.git
+                cd cloudza-well-architected-iac-analyzer
+                /home/ec2-user/update-config.sh
+                chmod +x deploy-wa-analyzer.sh
+                export AWS_REGION=${AWS::Region}
+                ./deploy-wa-analyzer.sh -r ${AWS::Region} -c docker -a ${AWS::StackName}
+                exit $?
               mode: "000755"
               owner: "ec2-user"
               group: "ec2-user"
@@ -624,7 +615,6 @@ Resources:
                   touch /tmp/deployment-success
                 else
                   touch /tmp/deployment-failure
-                  /opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
                 fi
 
         07_cleanup:
@@ -654,8 +644,11 @@ Resources:
           commands:
             01_send_signal_first:
               command: !Sub |
-                echo "Sending completion signal to CloudFormation at $(date)" >> /var/log/deploy-wa-analyzer.log
-                /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
+                if [ -f /tmp/deployment-failure ]; then
+                  /opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
+                else
+                  /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} >> /var/log/deploy-wa-analyzer.log 2>&1
+                fi
                 sleep 30
                 echo "Signal sent successfully at $(date)" >> /var/log/deploy-wa-analyzer.log
             02_schedule_deletion:
